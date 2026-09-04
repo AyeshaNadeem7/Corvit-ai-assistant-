@@ -1,31 +1,62 @@
+
 import os
 import pickle
 import faiss
 import numpy as np
+import streamlit as st
 
 from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
 from groq import Groq
 
 
-# ==========================================
-# LOAD ENVIRONMENT
-# ==========================================
+# ============================================================
+# LOAD GROQ API KEY
+# LOCAL  → .env
+# CLOUD  → Streamlit Secrets
+# ============================================================
 
-load_dotenv()
+def get_groq_api_key():
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+    # --------------------------------------------------------
+    # Try Streamlit Secrets first
+    # Works on Streamlit Cloud
+    # --------------------------------------------------------
+    try:
+        api_key = st.secrets.get("GROQ_API_KEY")
 
-if not GROQ_API_KEY:
+        if api_key:
+            return api_key
+    except Exception:
+        pass
+
+    # --------------------------------------------------------
+    # Fall back to .env
+    # Works locally
+    # --------------------------------------------------------
+    load_dotenv()
+
+    api_key = os.getenv("GROQ_API_KEY")
+
+    if api_key:
+        return api_key
+
+    # --------------------------------------------------------
+    # Nothing found
+    # --------------------------------------------------------
     raise ValueError(
         "GROQ_API_KEY is missing. "
-        "Please add it to your .env file."
+        "Add GROQ_API_KEY to your .env file locally "
+        "or Streamlit Cloud Secrets when deployed."
     )
 
 
-# ==========================================
+GROQ_API_KEY = get_groq_api_key()
+
+
+# ============================================================
 # CONFIGURATION
-# ==========================================
+# ============================================================
 
 INDEX_PATH = "vectorstore/corvit.index"
 CHUNKS_PATH = "vectorstore/chunks.pkl"
@@ -37,42 +68,99 @@ GROQ_MODEL = "openai/gpt-oss-20b"
 TOP_K = 5
 
 
-# ==========================================
-# LOAD COMPONENTS
-# ==========================================
+# ============================================================
+# CHECK VECTOR STORE
+# ============================================================
 
 if not os.path.exists(INDEX_PATH):
+
     raise FileNotFoundError(
-        "FAISS index not found.\n"
-        "Run: python ingest.py"
+        f"FAISS index not found: {INDEX_PATH}\n"
+        "Make sure the vectorstore folder is included "
+        "in your GitHub repository."
     )
+
 
 if not os.path.exists(CHUNKS_PATH):
+
     raise FileNotFoundError(
-        "chunks.pkl not found.\n"
-        "Run: python ingest.py"
+        f"Chunks file not found: {CHUNKS_PATH}\n"
+        "Make sure the vectorstore folder is included "
+        "in your GitHub repository."
     )
 
 
-embedding_model = SentenceTransformer(
-    EMBEDDING_MODEL
-)
+# ============================================================
+# LOAD EMBEDDING MODEL
+# ============================================================
 
-index = faiss.read_index(INDEX_PATH)
+@st.cache_resource
+def load_embedding_model():
 
-with open(CHUNKS_PATH, "rb") as f:
-    chunks = pickle.load(f)
-
-client = Groq(
-    api_key=GROQ_API_KEY
-)
+    return SentenceTransformer(
+        EMBEDDING_MODEL
+    )
 
 
-# ==========================================
+embedding_model = load_embedding_model()
+
+
+# ============================================================
+# LOAD FAISS INDEX
+# ============================================================
+
+@st.cache_resource
+def load_faiss_index():
+
+    return faiss.read_index(
+        INDEX_PATH
+    )
+
+
+index = load_faiss_index()
+
+
+# ============================================================
+# LOAD CHUNKS
+# ============================================================
+
+@st.cache_resource
+def load_chunks():
+
+    with open(
+        CHUNKS_PATH,
+        "rb"
+    ) as f:
+
+        return pickle.load(f)
+
+
+chunks = load_chunks()
+
+
+# ============================================================
+# GROQ CLIENT
+# ============================================================
+
+@st.cache_resource
+def load_groq_client():
+
+    return Groq(
+        api_key=GROQ_API_KEY
+    )
+
+
+client = load_groq_client()
+
+
+# ============================================================
 # RETRIEVE DOCUMENTS
-# ==========================================
+# ============================================================
 
-def retrieve_documents(query, top_k=TOP_K):
+def retrieve_documents(
+    query,
+    top_k=TOP_K
+):
 
     query_embedding = embedding_model.encode(
         [query],
@@ -113,15 +201,18 @@ def retrieve_documents(query, top_k=TOP_K):
     return results
 
 
-# ==========================================
+# ============================================================
 # BUILD CONTEXT
-# ==========================================
+# ============================================================
 
 def build_context(results):
 
     context_parts = []
 
-    for i, result in enumerate(results, start=1):
+    for i, result in enumerate(
+        results,
+        start=1
+    ):
 
         context_parts.append(
             f"""
@@ -135,11 +226,14 @@ Page: {result['page']}
     return "\n".join(context_parts)
 
 
-# ==========================================
+# ============================================================
 # GENERATE ANSWER
-# ==========================================
+# ============================================================
 
-def generate_answer(question, conversation_history=None):
+def generate_answer(
+    question,
+    conversation_history=None
+):
 
     results = retrieve_documents(
         question,
@@ -147,12 +241,17 @@ def generate_answer(question, conversation_history=None):
     )
 
     if not results:
+
         return (
             "I could not find relevant information "
             "in the Corvit knowledge base."
         ), results
 
-    context = build_context(results)
+
+    context = build_context(
+        results
+    )
+
 
     system_prompt = """
 You are Corvit Assistant, a helpful RAG chatbot
@@ -164,28 +263,39 @@ provided knowledge-base context.
 IMPORTANT RULES:
 
 1. Do not invent facts.
+
 2. Do not use information that is not supported
    by the retrieved context.
+
 3. If the answer is not available in the context,
    clearly say that the information is not available
    in the current knowledge base.
+
 4. Do not guess course fees, dates, timings,
    phone numbers, eligibility requirements,
    discounts, or course availability.
+
 5. If the knowledge base says information may change,
    mention that the user should verify the latest
    information with Corvit.
+
 6. Answer naturally and conversationally.
+
 7. Keep answers concise but useful.
-8. If the user asks about multiple things, answer
-   each part separately.
-9. If a source page number is available, mention
-   it at the end as a source.
+
+8. If the user asks about multiple things,
+   answer each part separately.
+
+9. If a source page number is available,
+   mention it at the end as a source.
+
 10. Never claim that you accessed a website unless
     that information is actually present in the context.
 
-The knowledge base is the source of truth for this chatbot.
+The knowledge base is the source of truth
+for this chatbot.
 """
+
 
     user_prompt = f"""
 KNOWLEDGE BASE CONTEXT:
@@ -199,6 +309,7 @@ USER QUESTION:
 Answer the user's question using the knowledge base.
 """
 
+
     messages = [
         {
             "role": "system",
@@ -206,7 +317,11 @@ Answer the user's question using the knowledge base.
         }
     ]
 
-    # Add limited conversation history
+
+    # ========================================================
+    # ADD CONVERSATION HISTORY
+    # ========================================================
+
     if conversation_history:
 
         for message in conversation_history[-6:]:
@@ -216,23 +331,44 @@ Answer the user's question using the knowledge base.
                 "assistant"
             ]:
 
-                messages.append({
-                    "role": message["role"],
-                    "content": message["content"]
-                })
+                messages.append(
+                    {
+                        "role": message["role"],
+                        "content": message["content"]
+                    }
+                )
 
-    messages.append({
-        "role": "user",
-        "content": user_prompt
-    })
+
+    # ========================================================
+    # ADD CURRENT QUESTION
+    # ========================================================
+
+    messages.append(
+        {
+            "role": "user",
+            "content": user_prompt
+        }
+    )
+
+
+    # ========================================================
+    # GROQ REQUEST
+    # ========================================================
 
     response = client.chat.completions.create(
+
         model=GROQ_MODEL,
+
         messages=messages,
+
         temperature=0.2,
+
         max_completion_tokens=700
     )
 
+
     answer = response.choices[0].message.content
 
+
     return answer, results
+
