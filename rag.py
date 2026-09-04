@@ -1,4 +1,3 @@
-
 import os
 import pickle
 import faiss
@@ -11,46 +10,87 @@ from groq import Groq
 
 # ============================================================
 # GET GROQ API KEY
-# LOCAL       -> .env
-# STREAMLIT   -> st.secrets
+#
+# Priority:
+# 1. Streamlit Cloud Secrets
+# 2. Environment variable
+# 3. Local .env
 # ============================================================
 
 def get_groq_api_key():
 
     # --------------------------------------------------------
-    # 1. Try Streamlit Cloud Secrets
+    # 1. STREAMLIT SECRETS
     # --------------------------------------------------------
+
     try:
         if "GROQ_API_KEY" in st.secrets:
 
-            api_key = st.secrets["GROQ_API_KEY"]
+            secret_key = st.secrets["GROQ_API_KEY"]
 
-            if api_key:
-                return api_key
+            if secret_key:
+
+                secret_key = str(secret_key).strip()
+
+                if secret_key:
+                    return secret_key
 
     except Exception:
         pass
 
 
     # --------------------------------------------------------
-    # 2. Try local .env file
+    # 2. ENVIRONMENT VARIABLE
     # --------------------------------------------------------
+
+    env_key = os.environ.get("GROQ_API_KEY")
+
+    if env_key:
+
+        env_key = env_key.strip()
+
+        if env_key:
+            return env_key
+
+
+    # --------------------------------------------------------
+    # 3. LOCAL .ENV
+    # --------------------------------------------------------
+
     load_dotenv()
 
-    api_key = os.getenv("GROQ_API_KEY")
+    dotenv_key = os.getenv("GROQ_API_KEY")
 
-    if api_key:
-        return api_key
+    if dotenv_key:
+
+        dotenv_key = dotenv_key.strip()
+
+        if dotenv_key:
+            return dotenv_key
 
 
     # --------------------------------------------------------
-    # 3. API key not found
+    # API KEY NOT FOUND
     # --------------------------------------------------------
+
     raise ValueError(
-        "GROQ_API_KEY is missing. "
-        "For local use, add GROQ_API_KEY to your .env file. "
-        "For Streamlit Cloud, add GROQ_API_KEY under "
-        "Manage app -> Settings -> Secrets."
+        """
+GROQ_API_KEY was not found.
+
+LOCAL:
+Create a .env file in the project root:
+
+GROQ_API_KEY=your_groq_api_key
+
+STREAMLIT CLOUD:
+Go to:
+
+Manage app -> Settings -> Secrets
+
+and add:
+
+GROQ_API_KEY = "your_groq_api_key"
+"""
     )
 
 
@@ -65,9 +105,7 @@ INDEX_PATH = "vectorstore/corvit.index"
 
 CHUNKS_PATH = "vectorstore/chunks.pkl"
 
-EMBEDDING_MODEL = (
-    "sentence-transformers/all-MiniLM-L6-v2"
-)
+EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 GROQ_MODEL = "openai/gpt-oss-20b"
 
@@ -78,32 +116,30 @@ TOP_K = 5
 # CHECK VECTOR STORE
 # ============================================================
 
-if not os.path.exists(INDEX_PATH):
+if not os.path.isfile(INDEX_PATH):
 
     raise FileNotFoundError(
         f"""
 FAISS index not found.
 
-Expected file:
+Expected:
 {INDEX_PATH}
 
-Make sure the vectorstore folder exists in your
-GitHub repository.
+Make sure this file exists in your GitHub repository.
 """
     )
 
 
-if not os.path.exists(CHUNKS_PATH):
+if not os.path.isfile(CHUNKS_PATH):
 
     raise FileNotFoundError(
         f"""
-chunks.pkl not found.
+Chunks file not found.
 
-Expected file:
+Expected:
 {CHUNKS_PATH}
 
-Make sure the vectorstore folder exists in your
-GitHub repository.
+Make sure this file exists in your GitHub repository.
 """
     )
 
@@ -157,7 +193,7 @@ chunks = load_chunks()
 
 
 # ============================================================
-# CREATE GROQ CLIENT
+# GROQ CLIENT
 # ============================================================
 
 @st.cache_resource
@@ -180,38 +216,22 @@ def retrieve_documents(
     top_k=TOP_K
 ):
 
-    # --------------------------------------------------------
-    # Create query embedding
-    # --------------------------------------------------------
-
     query_embedding = embedding_model.encode(
         [query],
         convert_to_numpy=True,
         normalize_embeddings=True
     )
 
-
     query_embedding = query_embedding.astype(
         "float32"
     )
-
-
-    # --------------------------------------------------------
-    # Search FAISS
-    # --------------------------------------------------------
 
     scores, indices = index.search(
         query_embedding,
         top_k
     )
 
-
     results = []
-
-
-    # --------------------------------------------------------
-    # Collect results
-    # --------------------------------------------------------
 
     for score, idx in zip(
         scores[0],
@@ -221,10 +241,8 @@ def retrieve_documents(
         if idx == -1:
             continue
 
-
         if idx >= len(chunks):
             continue
-
 
         result = {
             "text": chunks[idx]["text"],
@@ -232,11 +250,7 @@ def retrieve_documents(
             "score": float(score)
         }
 
-
-        results.append(
-            result
-        )
-
+        results.append(result)
 
     return results
 
@@ -248,7 +262,6 @@ def retrieve_documents(
 def build_context(results):
 
     context_parts = []
-
 
     for i, result in enumerate(
         results,
@@ -265,10 +278,7 @@ Page: {result['page']}
 """
         )
 
-
-    return "\n".join(
-        context_parts
-    )
+    return "\n".join(context_parts)
 
 
 # ============================================================
@@ -280,19 +290,10 @@ def generate_answer(
     conversation_history=None
 ):
 
-    # --------------------------------------------------------
-    # Retrieve relevant documents
-    # --------------------------------------------------------
-
     results = retrieve_documents(
         question,
         TOP_K
     )
-
-
-    # --------------------------------------------------------
-    # No relevant information
-    # --------------------------------------------------------
 
     if not results:
 
@@ -300,11 +301,6 @@ def generate_answer(
             "I could not find relevant information "
             "in the Corvit knowledge base."
         ), results
-
-
-    # --------------------------------------------------------
-    # Build context
-    # --------------------------------------------------------
 
     context = build_context(
         results
@@ -368,18 +364,16 @@ KNOWLEDGE BASE CONTEXT:
 
 {context}
 
-
 USER QUESTION:
 
 {question}
-
 
 Answer the user's question using the knowledge base.
 """
 
 
     # ========================================================
-    # BUILD MESSAGES
+    # MESSAGES
     # ========================================================
 
     messages = [
@@ -390,15 +384,15 @@ Answer the user's question using the knowledge base.
     ]
 
 
-    # --------------------------------------------------------
-    # Add conversation history
-    # --------------------------------------------------------
+    # ========================================================
+    # CONVERSATION HISTORY
+    # ========================================================
 
     if conversation_history:
 
         for message in conversation_history[-6:]:
 
-            if message["role"] in [
+            if message.get("role") in [
                 "user",
                 "assistant"
             ]:
@@ -411,9 +405,9 @@ Answer the user's question using the knowledge base.
                 )
 
 
-    # --------------------------------------------------------
-    # Add current question
-    # --------------------------------------------------------
+    # ========================================================
+    # CURRENT QUESTION
+    # ========================================================
 
     messages.append(
         {
@@ -424,7 +418,7 @@ Answer the user's question using the knowledge base.
 
 
     # ========================================================
-    # CALL GROQ
+    # GROQ API CALL
     # ========================================================
 
     response = client.chat.completions.create(
@@ -440,15 +434,11 @@ Answer the user's question using the knowledge base.
 
 
     # ========================================================
-    # GET ANSWER
+    # ANSWER
     # ========================================================
 
     answer = response.choices[0].message.content
 
-
-    # ========================================================
-    # RETURN
-    # ========================================================
 
     return answer, results
 
