@@ -1,8 +1,12 @@
 
+# ============================================================
 # rag.py
+# Corvit AI Assistant - RAG Backend
+# ============================================================
 
 import os
 import pickle
+
 import faiss
 import streamlit as st
 
@@ -11,16 +15,16 @@ from sentence_transformers import SentenceTransformer
 from groq import Groq
 
 
-# =========================================================
-# LOAD ENVIRONMENT VARIABLES
-# =========================================================
+# ============================================================
+# LOAD LOCAL .ENV
+# ============================================================
 
 load_dotenv()
 
 
-# =========================================================
-# PATHS
-# =========================================================
+# ============================================================
+# CONFIGURATION
+# ============================================================
 
 VECTORSTORE_DIR = "vectorstore"
 
@@ -34,80 +38,187 @@ CHUNKS_PATH = os.path.join(
     "chunks.pkl"
 )
 
-
-# =========================================================
-# SETTINGS
-# =========================================================
-
-TOP_K = 5
-
-EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+EMBEDDING_MODEL = (
+    "sentence-transformers/all-MiniLM-L6-v2"
+)
 
 GROQ_MODEL = "openai/gpt-oss-20b"
 
+TOP_K = 5
 
-# =========================================================
+
+# ============================================================
 # GET GROQ API KEY
-# =========================================================
+# ============================================================
 
 def get_groq_api_key():
 
-    # -----------------------------------------------------
-    # 1. Streamlit Cloud Secrets
-    # -----------------------------------------------------
+    # --------------------------------------------------------
+    # 1. STREAMLIT CLOUD SECRETS
+    # --------------------------------------------------------
 
     try:
-        api_key = st.secrets["GROQ_API_KEY"]
+
+        if "GROQ_API_KEY" in st.secrets:
+
+            api_key = st.secrets["GROQ_API_KEY"]
+
+            if api_key:
+
+                api_key = str(api_key).strip()
+
+                if api_key:
+
+                    print(
+                        "GROQ_API_KEY FOUND IN STREAMLIT SECRETS"
+                    )
+
+                    return api_key
+
+    except Exception as e:
+
+        print(
+            "STREAMLIT SECRETS ERROR:",
+            str(e)
+        )
+
+
+    # --------------------------------------------------------
+    # 2. ENVIRONMENT VARIABLE
+    # --------------------------------------------------------
+
+    try:
+
+        api_key = os.environ.get(
+            "GROQ_API_KEY"
+        )
 
         if api_key:
-            return str(api_key).strip()
 
-    except Exception:
-        pass
+            api_key = str(api_key).strip()
 
+            if api_key:
 
-    # -----------------------------------------------------
-    # 2. Environment Variable
-    # -----------------------------------------------------
+                print(
+                    "GROQ_API_KEY FOUND IN ENVIRONMENT"
+                )
 
-    api_key = os.environ.get("GROQ_API_KEY")
+                return api_key
 
-    if api_key:
-        return api_key.strip()
+    except Exception as e:
 
-
-    # -----------------------------------------------------
-    # 3. Local .env file
-    # -----------------------------------------------------
-
-    load_dotenv()
-
-    api_key = os.getenv("GROQ_API_KEY")
-
-    if api_key:
-        return api_key.strip()
+        print(
+            "ENVIRONMENT VARIABLE ERROR:",
+            str(e)
+        )
 
 
-    # Nothing found
+    # --------------------------------------------------------
+    # 3. LOCAL .ENV FILE
+    # --------------------------------------------------------
+
+    try:
+
+        load_dotenv()
+
+        api_key = os.getenv(
+            "GROQ_API_KEY"
+        )
+
+        if api_key:
+
+            api_key = str(api_key).strip()
+
+            if api_key:
+
+                print(
+                    "GROQ_API_KEY FOUND IN .ENV"
+                )
+
+                return api_key
+
+    except Exception as e:
+
+        print(
+            ".ENV ERROR:",
+            str(e)
+        )
+
+
+    # --------------------------------------------------------
+    # NOTHING FOUND
+    # --------------------------------------------------------
+
+    print(
+        "GROQ_API_KEY NOT FOUND"
+    )
+
     return None
 
 
-# =========================================================
+# ============================================================
 # GROQ CLIENT
-# =========================================================
+# ============================================================
 
 def get_groq_client():
 
     api_key = get_groq_api_key()
 
+
+    # --------------------------------------------------------
+    # DEBUG INFORMATION
+    # --------------------------------------------------------
+
+    if api_key:
+
+        print(
+            "GROQ_API_KEY FOUND: True"
+        )
+
+        print(
+            "GROQ_API_KEY LENGTH:",
+            len(api_key)
+        )
+
+    else:
+
+        print(
+            "GROQ_API_KEY FOUND: False"
+        )
+
+        try:
+
+            print(
+                "AVAILABLE STREAMLIT SECRETS:",
+                list(st.secrets.keys())
+            )
+
+        except Exception as e:
+
+            print(
+                "Could not read Streamlit secrets:",
+                str(e)
+            )
+
+
+    # --------------------------------------------------------
+    # KEY NOT AVAILABLE
+    # --------------------------------------------------------
+
     if not api_key:
 
         st.error(
             "GROQ_API_KEY was not found. "
-            "Please add it to Streamlit Secrets or your local .env file."
+            "Please check your Streamlit Cloud Secrets "
+            "or local .env file."
         )
 
         return None
+
+
+    # --------------------------------------------------------
+    # CREATE GROQ CLIENT
+    # --------------------------------------------------------
 
     try:
 
@@ -115,44 +226,66 @@ def get_groq_client():
             api_key=api_key
         )
 
+        print(
+            "GROQ CLIENT CREATED: True"
+        )
+
         return client
 
     except Exception as e:
 
+        print(
+            "GROQ CLIENT ERROR:",
+            str(e)
+        )
+
         st.error(
-            f"Unable to initialize Groq client: {str(e)}"
+            "Could not initialize the Groq AI service."
         )
 
         return None
 
 
-# =========================================================
+# ============================================================
 # LOAD EMBEDDING MODEL
-# =========================================================
+# ============================================================
 
 @st.cache_resource
 def load_embedding_model():
 
     try:
 
+        print(
+            "Loading embedding model..."
+        )
+
         model = SentenceTransformer(
             EMBEDDING_MODEL
+        )
+
+        print(
+            "Embedding model loaded successfully."
         )
 
         return model
 
     except Exception as e:
 
+        print(
+            "EMBEDDING MODEL ERROR:",
+            str(e)
+        )
+
         st.error(
-            f"Error loading embedding model: {str(e)}"
+            "Could not load the embedding model."
         )
 
         return None
 
 
-# =========================================================
+# ============================================================
 # LOAD FAISS INDEX
-# =========================================================
+# ============================================================
 
 @st.cache_resource
 def load_faiss_index():
@@ -163,28 +296,52 @@ def load_faiss_index():
             f"FAISS index not found: {INDEX_PATH}"
         )
 
+        print(
+            "FAISS INDEX NOT FOUND:",
+            INDEX_PATH
+        )
+
         return None
+
 
     try:
 
+        print(
+            "Loading FAISS index..."
+        )
+
         index = faiss.read_index(
             INDEX_PATH
+        )
+
+        print(
+            "FAISS index loaded successfully."
+        )
+
+        print(
+            "FAISS INDEX SIZE:",
+            index.ntotal
         )
 
         return index
 
     except Exception as e:
 
+        print(
+            "FAISS ERROR:",
+            str(e)
+        )
+
         st.error(
-            f"Error loading FAISS index: {str(e)}"
+            "Could not load the FAISS vector store."
         )
 
         return None
 
 
-# =========================================================
+# ============================================================
 # LOAD CHUNKS
-# =========================================================
+# ============================================================
 
 @st.cache_resource
 def load_chunks():
@@ -195,31 +352,58 @@ def load_chunks():
             f"Chunks file not found: {CHUNKS_PATH}"
         )
 
+        print(
+            "CHUNKS FILE NOT FOUND:",
+            CHUNKS_PATH
+        )
+
         return None
 
+
     try:
+
+        print(
+            "Loading chunks..."
+        )
 
         with open(
             CHUNKS_PATH,
             "rb"
         ) as file:
 
-            chunks = pickle.load(file)
+            chunks = pickle.load(
+                file
+            )
+
+
+        print(
+            "Chunks loaded successfully."
+        )
+
+        print(
+            "NUMBER OF CHUNKS:",
+            len(chunks)
+        )
 
         return chunks
 
     except Exception as e:
 
+        print(
+            "CHUNKS ERROR:",
+            str(e)
+        )
+
         st.error(
-            f"Error loading chunks.pkl: {str(e)}"
+            "Could not load chunks.pkl."
         )
 
         return None
 
 
-# =========================================================
+# ============================================================
 # LOAD ALL RAG COMPONENTS
-# =========================================================
+# ============================================================
 
 def load_rag_components():
 
@@ -229,99 +413,174 @@ def load_rag_components():
 
     chunks = load_chunks()
 
-    return model, index, chunks
+    return (
+        model,
+        index,
+        chunks
+    )
 
 
-# =========================================================
-# RETRIEVE RELEVANT DOCUMENTS
-# =========================================================
+# ============================================================
+# RETRIEVE DOCUMENTS
+# ============================================================
 
 def retrieve_documents(
     question,
     top_k=TOP_K
 ):
 
-    model, index, chunks = load_rag_components()
+    model, index, chunks = (
+        load_rag_components()
+    )
 
 
-    # Check components
+    # --------------------------------------------------------
+    # CHECK COMPONENTS
+    # --------------------------------------------------------
 
     if model is None:
+
         return []
+
 
     if index is None:
+
         return []
+
 
     if chunks is None:
+
         return []
 
 
-    try:
+    # --------------------------------------------------------
+    # CREATE QUERY EMBEDDING
+    # --------------------------------------------------------
 
-        # Create query embedding
+    try:
 
         query_embedding = model.encode(
             [question],
             convert_to_numpy=True
         )
 
-        # Make sure FAISS gets float32
-
-        query_embedding = query_embedding.astype(
-            "float32"
-        )
-
-
-        # Search FAISS
-
-        distances, indices = index.search(
-            query_embedding,
-            top_k
-        )
-
-
-        retrieved = []
-
-
-        for distance, idx in zip(
-            distances[0],
-            indices[0]
-        ):
-
-            if idx < 0:
-                continue
-
-            if idx >= len(chunks):
-                continue
-
-            retrieved.append(
-                {
-                    "text": chunks[idx],
-                    "score": float(distance)
-                }
+        query_embedding = (
+            query_embedding.astype(
+                "float32"
             )
-
-
-        return retrieved
+        )
 
 
     except Exception as e:
 
-        st.error(
-            f"Error during document retrieval: {str(e)}"
+        print(
+            "QUERY EMBEDDING ERROR:",
+            str(e)
         )
 
         return []
 
 
-# =========================================================
-# BUILD CONTEXT
-# =========================================================
+    # --------------------------------------------------------
+    # SEARCH FAISS
+    # --------------------------------------------------------
 
-def build_context(documents):
+    try:
+
+        distances, indices = (
+            index.search(
+                query_embedding,
+                top_k
+            )
+        )
+
+    except Exception as e:
+
+        print(
+            "FAISS SEARCH ERROR:",
+            str(e)
+        )
+
+        return []
+
+
+    # --------------------------------------------------------
+    # COLLECT RESULTS
+    # --------------------------------------------------------
+
+    retrieved_documents = []
+
+
+    for distance, idx in zip(
+        distances[0],
+        indices[0]
+    ):
+
+        if idx < 0:
+
+            continue
+
+
+        if idx >= len(chunks):
+
+            continue
+
+
+        chunk = chunks[idx]
+
+
+        # ----------------------------------------------------
+        # Handle different chunk formats
+        # ----------------------------------------------------
+
+        if isinstance(
+            chunk,
+            dict
+        ):
+
+            text = (
+                chunk.get("text")
+                or chunk.get("content")
+                or chunk.get("page_content")
+                or str(chunk)
+            )
+
+        else:
+
+            text = str(chunk)
+
+
+        retrieved_documents.append(
+            {
+                "text": text,
+                "score": float(distance),
+                "index": int(idx)
+            }
+        )
+
+
+    print(
+        "RETRIEVED DOCUMENTS:",
+        len(retrieved_documents)
+    )
+
+    return retrieved_documents
+
+
+# ============================================================
+# BUILD CONTEXT
+# ============================================================
+
+def build_context(
+    documents
+):
 
     if not documents:
-        return "No relevant information was found."
+
+        return (
+            "No relevant information was found "
+            "in the knowledge base."
+        )
 
 
     context_parts = []
@@ -332,10 +591,27 @@ def build_context(documents):
         start=1
     ):
 
-        text = document["text"]
+        text = document.get(
+            "text",
+            ""
+        )
+
+
+        if not text:
+
+            continue
+
 
         context_parts.append(
             f"Document {i}:\n{text}"
+        )
+
+
+    if not context_parts:
+
+        return (
+            "No relevant information was found "
+            "in the knowledge base."
         )
 
 
@@ -344,20 +620,87 @@ def build_context(documents):
     )
 
 
-# =========================================================
+# ============================================================
+# FORMAT CHAT HISTORY
+# ============================================================
+
+def format_chat_history(
+    chat_history
+):
+
+    if not chat_history:
+
+        return ""
+
+
+    history_parts = []
+
+
+    # Only use recent messages
+
+    recent_messages = (
+        chat_history[-6:]
+    )
+
+
+    for message in recent_messages:
+
+        if not isinstance(
+            message,
+            dict
+        ):
+
+            continue
+
+
+        role = message.get(
+            "role",
+            ""
+        )
+
+        content = message.get(
+            "content",
+            ""
+        )
+
+
+        if not content:
+
+            continue
+
+
+        if role == "user":
+
+            history_parts.append(
+                f"User: {content}"
+            )
+
+        elif role == "assistant":
+
+            history_parts.append(
+                f"Assistant: {content}"
+            )
+
+
+    return "\n".join(
+        history_parts
+    )
+
+
+# ============================================================
 # GENERATE ANSWER
-# =========================================================
+# ============================================================
 
 def generate_answer(
     question,
     chat_history=None
 ):
 
-    # -----------------------------------------------------
-    # Validate question
-    # -----------------------------------------------------
+    # --------------------------------------------------------
+    # VALIDATE QUESTION
+    # --------------------------------------------------------
 
-    if not question or not question.strip():
+    if not question:
 
         return (
             "Please enter a question.",
@@ -365,12 +708,22 @@ def generate_answer(
         )
 
 
-    question = question.strip()
+    question = str(
+        question
+    ).strip()
 
 
-    # -----------------------------------------------------
-    # Retrieve documents
-    # -----------------------------------------------------
+    if not question:
+
+        return (
+            "Please enter a question.",
+            []
+        )
+
+
+    # --------------------------------------------------------
+    # RETRIEVE RELEVANT DOCUMENTS
+    # --------------------------------------------------------
 
     documents = retrieve_documents(
         question,
@@ -378,18 +731,27 @@ def generate_answer(
     )
 
 
-    # -----------------------------------------------------
-    # Build context
-    # -----------------------------------------------------
+    # --------------------------------------------------------
+    # BUILD KNOWLEDGE CONTEXT
+    # --------------------------------------------------------
 
     context = build_context(
         documents
     )
 
 
-    # -----------------------------------------------------
-    # Get Groq client
-    # -----------------------------------------------------
+    # --------------------------------------------------------
+    # CHAT HISTORY
+    # --------------------------------------------------------
+
+    history = format_chat_history(
+        chat_history
+    )
+
+
+    # --------------------------------------------------------
+    # GET GROQ CLIENT
+    # --------------------------------------------------------
 
     client = get_groq_client()
 
@@ -403,141 +765,126 @@ def generate_answer(
         )
 
 
-    # -----------------------------------------------------
-    # Prepare conversation history
-    # -----------------------------------------------------
-
-    history_text = ""
-
-
-    if chat_history:
-
-        recent_messages = chat_history[-6:]
-
-
-        for message in recent_messages:
-
-            if not isinstance(
-                message,
-                dict
-            ):
-                continue
-
-
-            role = message.get(
-                "role",
-                ""
-            )
-
-            content = message.get(
-                "content",
-                ""
-            )
-
-
-            if not content:
-                continue
-
-
-            if role == "user":
-
-                history_text += (
-                    f"User: {content}\n"
-                )
-
-            elif role == "assistant":
-
-                history_text += (
-                    f"Assistant: {content}\n"
-                )
-
-
-    # -----------------------------------------------------
+    # ========================================================
     # SYSTEM PROMPT
-    # -----------------------------------------------------
+    # ========================================================
 
     system_prompt = """
 You are Corvit AI Assistant.
 
-You are a helpful assistant for Corvit Systems.
+You answer questions about Corvit Systems using
+the provided knowledge base.
 
-Answer the user's question using the provided knowledge base context.
+RULES:
 
-Important rules:
+1. Use the provided knowledge base as the primary source.
 
-1. Give accurate and concise answers.
-2. Prefer information from the provided context.
-3. Do not invent campus locations, courses, fees, timings, contacts,
-   policies, or other Corvit information.
-4. If the answer is clearly available in the context, answer directly.
-5. If the context does not contain the answer, politely say that
-   the information is not available in the current knowledge base.
-6. Do not mention FAISS, embeddings, RAG, vector databases,
-   retrieval systems, or internal technical details to the user.
-7. Maintain a professional and friendly tone.
-8. If the user asks a simple question, give a simple answer.
+2. Give direct, helpful and concise answers.
+
+3. Do not invent information about Corvit.
+
+4. If the answer is available in the knowledge base,
+   answer the question directly.
+
+5. If the answer cannot be found in the knowledge base,
+   politely say that the information is not available
+   in the current knowledge base.
+
+6. Do not mention technical details such as:
+   FAISS, embeddings, vector stores, RAG, chunks,
+   retrieval, or internal implementation.
+
+7. Do not expose API keys or other secrets.
+
+8. Keep the answer professional and friendly.
+
+9. If the user asks about a campus, provide the campus
+   location/details found in the knowledge base.
+
+10. Never make up an address or location.
 """
 
 
-    # -----------------------------------------------------
+    # ========================================================
     # USER PROMPT
-    # -----------------------------------------------------
+    # ========================================================
 
     user_prompt = f"""
-Knowledge Base Context:
+KNOWLEDGE BASE:
 
 {context}
 
 
-Previous Conversation:
+PREVIOUS CONVERSATION:
 
-{history_text}
+{history}
 
 
-Current User Question:
+CURRENT QUESTION:
 
 {question}
 
 
-Answer the user's question based on the knowledge base.
+Answer the current question using the knowledge base.
 """
 
 
-    # -----------------------------------------------------
+    # ========================================================
     # CALL GROQ
-    # -----------------------------------------------------
+    # ========================================================
 
     try:
 
-        response = client.chat.completions.create(
+        print(
+            "Sending request to Groq..."
+        )
 
-            model=GROQ_MODEL,
+        response = (
+            client.chat.completions.create(
 
-            messages=[
-                {
-                    "role": "system",
-                    "content": system_prompt
-                },
-                {
-                    "role": "user",
-                    "content": user_prompt
-                }
-            ],
+                model=GROQ_MODEL,
 
-            temperature=0.2,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": system_prompt
+                    },
+                    {
+                        "role": "user",
+                        "content": user_prompt
+                    }
+                ],
 
-            max_tokens=700
+                temperature=0.2,
+
+                max_tokens=700
+            )
         )
 
 
-        answer = response.choices[0].message.content
+        # ----------------------------------------------------
+        # GET ANSWER
+        # ----------------------------------------------------
+
+        answer = (
+            response
+            .choices[0]
+            .message
+            .content
+        )
 
 
         if not answer:
 
             answer = (
-                "Sorry, I could not generate an answer."
+                "Sorry, I could not generate "
+                "an answer."
             )
+
+
+        print(
+            "Groq response received successfully."
+        )
 
 
         return (
@@ -546,17 +893,19 @@ Answer the user's question based on the knowledge base.
         )
 
 
+    # ========================================================
+    # GROQ ERROR
+    # ========================================================
+
     except Exception as e:
 
-        error_message = str(e)
-
-
-        # Do not expose API key or sensitive details
-
-        st.error(
-            f"Groq API error: {error_message}"
+        print(
+            "GROQ API ERROR:",
+            str(e)
         )
 
+
+        # Do not expose technical error to user
 
         return (
             "Sorry, I could not connect to the AI service. "
@@ -565,37 +914,55 @@ Answer the user's question based on the knowledge base.
         )
 
 
-# =========================================================
-# OPTIONAL: SIMPLE TEST FUNCTION
-# =========================================================
+# ============================================================
+# OPTIONAL GROQ CONNECTION TEST
+# ============================================================
 
 def test_groq_connection():
 
     client = get_groq_client()
 
+
     if client is None:
 
         return False
 
+
     try:
 
-        response = client.chat.completions.create(
+        response = (
+            client.chat.completions.create(
 
-            model=GROQ_MODEL,
+                model=GROQ_MODEL,
 
-            messages=[
-                {
-                    "role": "user",
-                    "content": "Say OK"
-                }
-            ],
+                messages=[
+                    {
+                        "role": "user",
+                        "content": "Reply with OK."
+                    }
+                ],
 
-            max_tokens=10
+                max_tokens=10
+            )
         )
 
-        return bool(response)
 
-    except Exception:
+        if response:
 
-        return False
+            print(
+                "GROQ CONNECTION TEST: SUCCESS"
+            )
+
+            return True
+
+
+    except Exception as e:
+
+        print(
+            "GROQ CONNECTION TEST FAILED:",
+            str(e)
+        )
+
+
+    return False
 
