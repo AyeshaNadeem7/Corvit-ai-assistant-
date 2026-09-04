@@ -5,5 +5,3 @@ __pycache__/
 .streamlit/
 venv/
 .venv/
-
-vectorstore/
