@@ -1,3 +1,4 @@
+
 import os
 import pickle
 import faiss
@@ -9,100 +10,10 @@ from groq import Groq
 
 
 # ============================================================
-# GET GROQ API KEY
-#
-# Priority:
-# 1. Streamlit Cloud Secrets
-# 2. Environment variable
-# 3. Local .env
-# ============================================================
-
-def get_groq_api_key():
-
-    # --------------------------------------------------------
-    # 1. STREAMLIT SECRETS
-    # --------------------------------------------------------
-
-    try:
-        if "GROQ_API_KEY" in st.secrets:
-
-            secret_key = st.secrets["GROQ_API_KEY"]
-
-            if secret_key:
-
-                secret_key = str(secret_key).strip()
-
-                if secret_key:
-                    return secret_key
-
-    except Exception:
-        pass
-
-
-    # --------------------------------------------------------
-    # 2. ENVIRONMENT VARIABLE
-    # --------------------------------------------------------
-
-    env_key = os.environ.get("GROQ_API_KEY")
-
-    if env_key:
-
-        env_key = env_key.strip()
-
-        if env_key:
-            return env_key
-
-
-    # --------------------------------------------------------
-    # 3. LOCAL .ENV
-    # --------------------------------------------------------
-
-    load_dotenv()
-
-    dotenv_key = os.getenv("GROQ_API_KEY")
-
-    if dotenv_key:
-
-        dotenv_key = dotenv_key.strip()
-
-        if dotenv_key:
-            return dotenv_key
-
-
-    # --------------------------------------------------------
-    # API KEY NOT FOUND
-    # --------------------------------------------------------
-
-    raise ValueError(
-        """
-GROQ_API_KEY was not found.
-
-LOCAL:
-Create a .env file in the project root:
-
-GROQ_API_KEY=your_groq_api_key
-
-STREAMLIT CLOUD:
-Go to:
-
-Manage app -> Settings -> Secrets
-
-and add:
-
-GROQ_API_KEY = "your_groq_api_key"
-"""
-    )
-
-
-GROQ_API_KEY = get_groq_api_key()
-
-
-# ============================================================
 # CONFIGURATION
 # ============================================================
 
 INDEX_PATH = "vectorstore/corvit.index"
-
 CHUNKS_PATH = "vectorstore/chunks.pkl"
 
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
@@ -113,6 +24,86 @@ TOP_K = 5
 
 
 # ============================================================
+# GET GROQ API KEY
+# ============================================================
+
+def get_groq_api_key():
+
+    # --------------------------------------------------------
+    # STREAMLIT CLOUD SECRETS
+    # --------------------------------------------------------
+
+    try:
+
+        api_key = st.secrets["GROQ_API_KEY"]
+
+        if api_key:
+
+            return str(api_key).strip()
+
+    except Exception:
+        pass
+
+
+    # --------------------------------------------------------
+    # ENVIRONMENT VARIABLE
+    # --------------------------------------------------------
+
+    api_key = os.environ.get("GROQ_API_KEY")
+
+    if api_key:
+
+        return api_key.strip()
+
+
+    # --------------------------------------------------------
+    # LOCAL .ENV
+    # --------------------------------------------------------
+
+    load_dotenv()
+
+    api_key = os.getenv("GROQ_API_KEY")
+
+    if api_key:
+
+        return api_key.strip()
+
+
+    return None
+
+
+# ============================================================
+# GROQ CLIENT
+# ============================================================
+
+@st.cache_resource
+def get_groq_client():
+
+    api_key = get_groq_api_key()
+
+    if not api_key:
+
+        st.error(
+            """
+            GROQ_API_KEY was not found.
+
+            If running locally:
+            Add GROQ_API_KEY to your .env file.
+
+            If running on Streamlit Cloud:
+            Add GROQ_API_KEY in
+            Manage App → Settings → Secrets.
+            """
+        )
+
+        return None
+
+    return Groq(
+        api_key=api_key
+    )
+
+
+# ============================================================
 # CHECK VECTOR STORE
 # ============================================================
 
@@ -120,12 +111,12 @@ if not os.path.isfile(INDEX_PATH):
 
     raise FileNotFoundError(
         f"""
-FAISS index not found.
+FAISS index not found:
 
-Expected:
 {INDEX_PATH}
 
-Make sure this file exists in your GitHub repository.
+Make sure the vectorstore folder is included
+in your GitHub repository.
 """
     )
 
@@ -134,12 +125,12 @@ if not os.path.isfile(CHUNKS_PATH):
 
     raise FileNotFoundError(
         f"""
-Chunks file not found.
+Chunks file not found:
 
-Expected:
 {CHUNKS_PATH}
 
-Make sure this file exists in your GitHub repository.
+Make sure the vectorstore folder is included
+in your GitHub repository.
 """
     )
 
@@ -193,21 +184,6 @@ chunks = load_chunks()
 
 
 # ============================================================
-# GROQ CLIENT
-# ============================================================
-
-@st.cache_resource
-def load_groq_client():
-
-    return Groq(
-        api_key=GROQ_API_KEY
-    )
-
-
-client = load_groq_client()
-
-
-# ============================================================
 # RETRIEVE DOCUMENTS
 # ============================================================
 
@@ -244,13 +220,13 @@ def retrieve_documents(
         if idx >= len(chunks):
             continue
 
-        result = {
-            "text": chunks[idx]["text"],
-            "page": chunks[idx]["page"],
-            "score": float(score)
-        }
-
-        results.append(result)
+        results.append(
+            {
+                "text": chunks[idx]["text"],
+                "page": chunks[idx]["page"],
+                "score": float(score)
+            }
+        )
 
     return results
 
@@ -271,7 +247,6 @@ def build_context(results):
         context_parts.append(
             f"""
 SOURCE {i}
-
 Page: {result['page']}
 
 {result['text']}
@@ -290,10 +265,29 @@ def generate_answer(
     conversation_history=None
 ):
 
+    # --------------------------------------------------------
+    # Get Groq client ONLY when needed
+    # --------------------------------------------------------
+
+    client = get_groq_client()
+
+    if client is None:
+
+        return (
+            "The AI service is not configured correctly. "
+            "Please check the GROQ_API_KEY configuration."
+        ), []
+
+
+    # --------------------------------------------------------
+    # Retrieve documents
+    # --------------------------------------------------------
+
     results = retrieve_documents(
         question,
         TOP_K
     )
+
 
     if not results:
 
@@ -301,6 +295,11 @@ def generate_answer(
             "I could not find relevant information "
             "in the Corvit knowledge base."
         ), results
+
+
+    # --------------------------------------------------------
+    # Build context
+    # --------------------------------------------------------
 
     context = build_context(
         results
@@ -384,9 +383,9 @@ Answer the user's question using the knowledge base.
     ]
 
 
-    # ========================================================
-    # CONVERSATION HISTORY
-    # ========================================================
+    # --------------------------------------------------------
+    # Conversation history
+    # --------------------------------------------------------
 
     if conversation_history:
 
@@ -405,9 +404,9 @@ Answer the user's question using the knowledge base.
                 )
 
 
-    # ========================================================
-    # CURRENT QUESTION
-    # ========================================================
+    # --------------------------------------------------------
+    # Current question
+    # --------------------------------------------------------
 
     messages.append(
         {
@@ -418,23 +417,37 @@ Answer the user's question using the knowledge base.
 
 
     # ========================================================
-    # GROQ API CALL
+    # GROQ REQUEST
     # ========================================================
 
-    response = client.chat.completions.create(
+    try:
 
-        model=GROQ_MODEL,
+        response = client.chat.completions.create(
 
-        messages=messages,
+            model=GROQ_MODEL,
 
-        temperature=0.2,
+            messages=messages,
 
-        max_completion_tokens=700
-    )
+            temperature=0.2,
+
+            max_completion_tokens=700
+        )
+
+    except Exception as e:
+
+        print(
+            "GROQ ERROR:",
+            str(e)
+        )
+
+        return (
+            "Sorry, I couldn't connect to the AI service "
+            "right now. Please try again."
+        ), results
 
 
     # ========================================================
-    # ANSWER
+    # GET ANSWER
     # ========================================================
 
     answer = response.choices[0].message.content
